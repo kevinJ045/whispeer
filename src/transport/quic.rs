@@ -30,7 +30,7 @@ fn configure_server() -> Result<(ServerConfig, Vec<u8>), Box<dyn Error>> {
 
   let mut server_config = ServerConfig::with_single_cert(cert_chain, priv_key)?;
   let transport_config = std::sync::Arc::get_mut(&mut server_config.transport).unwrap();
-  transport_config.max_concurrent_uni_streams(0_u8.into());
+  transport_config.max_concurrent_uni_streams(1024_u32.into());
 
   Ok((server_config, cert_der))
 }

@@ -159,7 +159,11 @@ impl Broker {
       println!("Received network message for topic: {}", msg.topic);
       // Publish locally
       // We assume String for now
-      let _ = self.publish_local(&msg.topic, msg.payload).await;
+      if let Ok(payload_content) = serde_json::from_str::<String>(&msg.payload) {
+        let _ = self.publish_local(&msg.topic, payload_content).await;
+      } else {
+        let _ = self.publish_local(&msg.topic, msg.payload).await;
+      }
     }
 
     Ok(())
