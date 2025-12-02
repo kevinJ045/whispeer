@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+
 pub trait MessageLocal<'a>: 'a + Send + Sync + Clone {}
 impl<'a, T: 'a + Send + Sync + Clone> MessageLocal<'a> for T {}
 

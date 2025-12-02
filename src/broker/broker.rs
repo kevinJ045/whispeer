@@ -1,16 +1,14 @@
 use crate::broker::subscriber::Subscriber;
-use crate::broker::topic::Topic;
+use crate::broker::topic::{Topic, TopicOperations};
 use crate::transport::quic::{make_client_endpoint, make_server_endpoint};
 use dashmap::DashMap;
 use quinn::{Connection, Endpoint};
-use serde::{Deserialize, Serialize};
-use std::any::Any;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
 
-use super::MessageLocal;
-use super::message::MessageSend;
+use super::message::{MessageLocal, MessageSend};
 
 #[derive(Error, Debug)]
 pub enum BrokerError {
@@ -31,7 +29,7 @@ struct WireMessage {
 /// The Broker manages topics and subscribers.
 #[derive(Clone)]
 pub struct Broker {
-  topics: Arc<DashMap<String, Box<dyn Any + Send + Sync>>>,
+  topics: Arc<DashMap<String, Box<dyn TopicOperations>>>,
   peers: Arc<DashMap<SocketAddr, Connection>>,
   endpoint: Option<Endpoint>,
 }
@@ -157,12 +155,8 @@ impl Broker {
 
     if let Ok(msg) = serde_json::from_slice::<WireMessage>(&buf) {
       println!("Received network message for topic: {}", msg.topic);
-      // Publish locally
-      // We assume String for now
-      if let Ok(payload_content) = serde_json::from_str::<String>(&msg.payload) {
-        let _ = self.publish_local(&msg.topic, payload_content).await;
-      } else {
-        let _ = self.publish_local(&msg.topic, msg.payload).await;
+      if let Some(topic) = self.topics.get(&msg.topic) {
+        topic.publish_json(&msg.payload).await;
       }
     }
 
@@ -170,7 +164,7 @@ impl Broker {
   }
 
   /// Subscribes to a topic. Creates the topic if it doesn't exist.
-  pub fn subscribe<T: 'static + Send + Sync + Clone>(
+  pub fn subscribe<T: 'static + Send + Sync + Clone + DeserializeOwned>(
     &self,
     topic_name: impl Into<String>,
     handler: impl Fn(T) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
@@ -184,7 +178,7 @@ impl Broker {
       .entry(topic_name.clone())
       .or_insert_with(|| Box::new(Topic::<T>::new(topic_name.clone())));
 
-    if let Some(topic) = entry.downcast_mut::<Topic<T>>() {
+    if let Some(topic) = entry.as_any_mut().downcast_mut::<Topic<T>>() {
       let subscriber = Subscriber::new(handler);
       topic.add_subscriber(subscriber);
     } else {
@@ -239,19 +233,7 @@ impl Broker {
     message: T,
   ) -> Result<(), BrokerError> {
     if let Some(mut entry) = self.topics.get_mut(topic_name) {
-      // We need to handle the case where the topic was created with a different type (e.g. String from network)
-      // If T is String, it might work. If T is MyData, and the topic is MyData, it works.
-      // But if we receive a String from network and try to publish to a Topic<MyData>, it will fail downcast.
-      // For this MVP, we might need to deserialize the payload into T?
-      // But we don't know T here in handle_stream.
-      // handle_stream calls publish_local with String.
-      // So if the local topic is Topic<String>, it works.
-      // If the local topic is Topic<MyData>, it fails.
-      // This is a limitation of the dynamic typing + network.
-      // Ideally we'd have a way to deserialize based on topic type.
-      // For now, let's assume everything is String over network or we only test String.
-
-      if let Some(topic) = entry.downcast_mut::<Topic<T>>() {
+      if let Some(topic) = entry.as_any_mut().downcast_mut::<Topic<T>>() {
         for sub in &topic.subscribers {
           let msg_clone = message.clone();
           let handler = &sub.handler;
@@ -259,13 +241,17 @@ impl Broker {
         }
         Ok(())
       } else {
-        // If we are publishing String (from network) but topic is MyData, we can't do much without deserialization logic.
-        // We'll just ignore for now or return error.
         Err(BrokerError::TypeMismatch)
       }
     } else {
       Ok(())
     }
+  }
+}
+
+impl Broker {
+  pub fn endpoint(&self) -> Option<Endpoint> {
+    return self.endpoint.clone();
   }
 }
 

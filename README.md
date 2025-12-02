@@ -64,6 +64,10 @@ This project targets **secure messaging, real-time applications, and extensible 
 
 ### Milestone 3: Compression Engine
 **Goal:** Add transparent compression support
+**Example**:
+```rust
+let broker = Broker::new().with(Compression::new());
+```
 
 **Tasks:**
 - [ ] Integrate `zstd` or `lz4` compression
