@@ -1,4 +1,5 @@
 pub mod broker;
+pub mod plugins;
 pub mod transport;
 
 pub use broker::Broker;
@@ -6,6 +7,8 @@ pub use broker::Broker;
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::plugins::compression::CompressionPlugin;
+  use crate::plugins::encryption::EncryptionPlugin;
   use std::sync::Arc;
   use std::time::Duration;
   use tokio::sync::Mutex;
@@ -65,14 +68,14 @@ mod tests {
   #[tokio::test]
   async fn test_p2p_messaging() {
     // Broker A - Listener
-    let addr_a = "127.0.0.1:5001";
-    let broker_a = Broker::start(format!("server {addr_a}"))
+    let addr_a = "127.0.0.1:5002";
+    let broker_a = Broker::start(format!("server {}", addr_a))
       .await
       .expect("Failed to start broker A");
 
     // Broker B - Connector
     // We give it the same address so it tries to bind, fails, and connects to A
-    let broker_b = Broker::start(format!("client {addr_a}"))
+    let broker_b = Broker::start(format!("client {}", addr_a))
       .await
       .expect("Failed to start broker B");
 
@@ -80,7 +83,6 @@ mod tests {
     let received_msg = Arc::new(Mutex::new(None));
     let received_msg_clone = received_msg.clone();
     broker_a.subscribe("chat", move |msg: String| {
-      println!("{msg}");
       let received_msg = received_msg_clone.clone();
       Box::pin(async move {
         let mut lock = received_msg.lock().await;
@@ -106,10 +108,108 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn test_compression_plugin() {
+    // Broker A - Listener
+    let addr_a = "127.0.0.1:5003";
+    let broker_a = Broker::start(format!("server {}", addr_a))
+      .await
+      .expect("Failed to start broker A");
+    broker_a
+      .add_plugin(Box::new(CompressionPlugin::new()))
+      .await;
+
+    // Broker B - Connector
+    let broker_b = Broker::start(format!("client {}", addr_a))
+      .await
+      .expect("Failed to start broker B");
+    broker_b
+      .add_plugin(Box::new(CompressionPlugin::new()))
+      .await;
+
+    // Subscribe on A
+    let received_msg = Arc::new(Mutex::new(None));
+    let received_msg_clone = received_msg.clone();
+    broker_a.subscribe("compressed_chat", move |msg: String| {
+      let received_msg = received_msg_clone.clone();
+      Box::pin(async move {
+        let mut lock = received_msg.lock().await;
+        *lock = Some(msg);
+      })
+    });
+
+    // Wait for connection
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Publish on B
+    let msg = "This is a message that should be compressed".to_string();
+    broker_b
+      .publish("compressed_chat", msg.clone())
+      .await
+      .expect("Failed to publish");
+
+    // Wait for message delivery
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let lock = received_msg.lock().await;
+    assert_eq!(*lock, Some(msg));
+  }
+
+  #[tokio::test]
+  async fn test_encryption_plugin() {
+    // Broker A - Listener
+    let addr_a = "127.0.0.1:5003";
+    let encryption_key = [
+      12, 22, 44, 55, 66, 66, 33, 44, 55, 66, 77, 88, 99, 100, 111, 122, 133, 144, 155, 166, 177,
+      188, 199, 200, 211, 222, 233, 244, 4, 55, 66, 44,
+    ];
+    let broker_a = Broker::start(format!("server {}", addr_a))
+      .await
+      .expect("Failed to start broker A");
+    broker_a
+      .add_plugin(Box::new(EncryptionPlugin::new(encryption_key.clone())))
+      .await;
+
+    // Broker B - Connector
+    let broker_b = Broker::start(format!("client {}", addr_a))
+      .await
+      .expect("Failed to start broker B");
+    broker_b
+      .add_plugin(Box::new(EncryptionPlugin::new(encryption_key.clone())))
+      .await;
+
+    // Subscribe on A
+    let received_msg = Arc::new(Mutex::new(None));
+    let received_msg_clone = received_msg.clone();
+    broker_a.subscribe("encrypted", move |msg: String| {
+      let received_msg = received_msg_clone.clone();
+      Box::pin(async move {
+        let mut lock = received_msg.lock().await;
+        *lock = Some(msg);
+      })
+    });
+
+    // Wait for connection
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Publish on B
+    let msg = "This is a message that should be encrypted".to_string();
+    broker_b
+      .publish("encrypted", msg.clone())
+      .await
+      .expect("Failed to publish");
+
+    // Wait for message delivery
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    let lock = received_msg.lock().await;
+    assert_eq!(*lock, Some(msg));
+  }
+
+  #[tokio::test]
   async fn test_p2p_types() {
     use serde::{Deserialize, Serialize};
     // Broker A - Listener
-    let addr_a = "127.0.0.1:5002";
+    let addr_a = "127.0.0.1:5004"; // Changed to avoid conflict with test_p2p_messaging
     let broker_a = Broker::start(format!("server {addr_a}"))
       .await
       .expect("Failed to start broker A");

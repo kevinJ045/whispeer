@@ -1,12 +1,16 @@
 use crate::broker::subscriber::Subscriber;
 use crate::broker::topic::{Topic, TopicOperations};
+use crate::plugins::manager::PluginManager;
+use crate::plugins::plugin::Plugin;
 use crate::transport::quic::{make_client_endpoint, make_server_endpoint};
 use dashmap::DashMap;
 use quinn::{Connection, Endpoint};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::RwLock;
 
 use super::message::{MessageLocal, MessageSend};
 
@@ -18,20 +22,23 @@ pub enum BrokerError {
   TypeMismatch,
   #[error("Network error: {0}")]
   NetworkError(String),
+  #[error("Plugin error: {0}")]
+  PluginError(String),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct WireMessage {
   topic: String,
-  payload: String, // For MVP, we treat everything as String over the wire
+  payload: Vec<u8>,
+  headers: HashMap<String, String>,
 }
 
-/// The Broker manages topics and subscribers.
 #[derive(Clone)]
 pub struct Broker {
   topics: Arc<DashMap<String, Box<dyn TopicOperations>>>,
   peers: Arc<DashMap<SocketAddr, Connection>>,
   endpoint: Option<Endpoint>,
+  plugin_manager: Arc<RwLock<PluginManager>>,
 }
 
 impl Broker {
@@ -40,7 +47,12 @@ impl Broker {
       topics: Arc::new(DashMap::new()),
       peers: Arc::new(DashMap::new()),
       endpoint: None,
+      plugin_manager: Arc::new(RwLock::new(PluginManager::new())),
     }
+  }
+
+  pub async fn add_plugin(&self, plugin: Box<dyn Plugin>) {
+    self.plugin_manager.write().await.add_plugin(plugin);
   }
 
   /// Starts the broker on the given address.
@@ -58,6 +70,7 @@ impl Broker {
         topics: Arc::new(DashMap::new()),
         peers: Arc::new(DashMap::new()),
         endpoint: Some(endpoint.clone()),
+        plugin_manager: Arc::new(RwLock::new(PluginManager::new())),
       };
 
       // Spawn listener task
@@ -88,6 +101,7 @@ impl Broker {
         topics: Arc::new(DashMap::new()),
         peers: Arc::new(DashMap::new()),
         endpoint: Some(endpoint),
+        plugin_manager: Arc::new(RwLock::new(PluginManager::new())),
       };
 
       broker.peers.insert(addr, connection.clone());
@@ -146,17 +160,29 @@ impl Broker {
     }
   }
 
-  async fn handle_stream(
-    &self,
-    mut stream: quinn::RecvStream,
-  ) -> Result<(), Box<dyn std::error::Error>> {
+  async fn handle_stream(&self, mut stream: quinn::RecvStream) -> Result<(), anyhow::Error> {
     println!("Handling Stream");
     let buf = stream.read_to_end(1024 * 1024).await?;
 
-    if let Ok(msg) = serde_json::from_slice::<WireMessage>(&buf) {
+    if let Ok(mut msg) = serde_json::from_slice::<WireMessage>(&buf) {
       println!("Received network message for topic: {}", msg.topic);
-      if let Some(topic) = self.topics.get(&msg.topic) {
-        topic.publish_json(&msg.payload).await;
+
+      // Run plugins on received message
+      self
+        .plugin_manager
+        .read()
+        .await
+        .on_message_received(&msg.topic, &mut msg.payload, &msg.headers)
+        .await?;
+
+      // Convert payload back to string for MVP JSON publishing
+      // This assumes the payload is valid UTF-8 JSON after plugin processing (decompression)
+      if let Ok(payload_str) = String::from_utf8(msg.payload) {
+        if let Some(topic) = self.topics.get(&msg.topic) {
+          topic.publish_json(&payload_str).await;
+        }
+      } else {
+        eprintln!("Failed to convert payload to string after processing");
       }
     }
 
@@ -200,12 +226,25 @@ impl Broker {
     self.publish_local(&topic_name, message.clone()).await?;
 
     // 2. Publish to peers
-    // We serialize to String for MVP wire format
-    let payload =
+    // Serialize message to JSON string first
+    let payload_str =
       serde_json::to_string(&message).map_err(|e| BrokerError::NetworkError(e.to_string()))?;
+    let mut payload = payload_str.into_bytes();
+    let mut headers = HashMap::new();
+
+    // Run plugins on publish
+    self
+      .plugin_manager
+      .read()
+      .await
+      .on_publish(&topic_name, &mut payload, &mut headers)
+      .await
+      .map_err(|e| BrokerError::PluginError(e.to_string()))?;
+
     let wire_msg = WireMessage {
       topic: topic_name,
       payload,
+      headers,
     };
     let bytes =
       serde_json::to_vec(&wire_msg).map_err(|e| BrokerError::NetworkError(e.to_string()))?;
