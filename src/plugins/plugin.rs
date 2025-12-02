@@ -5,6 +5,10 @@ use std::collections::HashMap;
 pub trait Plugin: Send + Sync {
   fn name(&self) -> &str;
 
+  async fn on_init(&mut self, _broker: &crate::Broker) -> Result<(), anyhow::Error> {
+    Ok(())
+  }
+
   async fn on_publish(
     &self,
     topic: &str,

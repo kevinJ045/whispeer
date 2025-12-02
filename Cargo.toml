@@ -22,3 +22,5 @@ aes-gcm = "0.10"
 aes = "0.8"
 rand = "0.8"
 base64 = "0.21"
+tokio-tungstenite = { version = "*" }
+futures-util = "*"

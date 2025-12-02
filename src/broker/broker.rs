@@ -51,7 +51,11 @@ impl Broker {
     }
   }
 
-  pub async fn add_plugin(&self, plugin: Box<dyn Plugin>) {
+  pub async fn add_plugin(&self, mut plugin: Box<dyn Plugin>) {
+    if let Err(e) = plugin.on_init(self).await {
+      eprintln!("Plugin {} failed to initialize: {}", plugin.name(), e);
+      return;
+    }
     self.plugin_manager.write().await.add_plugin(plugin);
   }
 
@@ -190,7 +194,7 @@ impl Broker {
   }
 
   /// Subscribes to a topic. Creates the topic if it doesn't exist.
-  pub fn subscribe<T: 'static + Send + Sync + Clone + DeserializeOwned>(
+  pub fn subscribe<T: 'static + Send + Sync + Clone + DeserializeOwned + Serialize>(
     &self,
     topic_name: impl Into<String>,
     handler: impl Fn(T) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
@@ -291,6 +295,13 @@ impl Broker {
 impl Broker {
   pub fn endpoint(&self) -> Option<Endpoint> {
     return self.endpoint.clone();
+  }
+
+  pub fn get_topic(
+    &self,
+    name: &str,
+  ) -> Option<dashmap::mapref::one::RefMut<String, Box<dyn TopicOperations>>> {
+    self.topics.get_mut(name)
   }
 }
 

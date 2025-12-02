@@ -110,7 +110,7 @@ mod tests {
   #[tokio::test]
   async fn test_compression_plugin() {
     // Broker A - Listener
-    let addr_a = "127.0.0.1:5003";
+    let addr_a = "127.0.0.1:5005";
     let broker_a = Broker::start(format!("server {}", addr_a))
       .await
       .expect("Failed to start broker A");
