@@ -114,17 +114,13 @@ mod tests {
     let broker_a = Broker::start(format!("server {}", addr_a))
       .await
       .expect("Failed to start broker A");
-    broker_a
-      .add_plugin(Box::new(CompressionPlugin::new()))
-      .await;
+    broker_a.add_plugin(CompressionPlugin::new()).await;
 
     // Broker B - Connector
     let broker_b = Broker::start(format!("client {}", addr_a))
       .await
       .expect("Failed to start broker B");
-    broker_b
-      .add_plugin(Box::new(CompressionPlugin::new()))
-      .await;
+    broker_b.add_plugin(CompressionPlugin::new()).await;
 
     // Subscribe on A
     let received_msg = Arc::new(Mutex::new(None));
@@ -166,7 +162,7 @@ mod tests {
       .await
       .expect("Failed to start broker A");
     broker_a
-      .add_plugin(Box::new(EncryptionPlugin::new(encryption_key.clone())))
+      .add_plugin(EncryptionPlugin::new(encryption_key.clone()))
       .await;
 
     // Broker B - Connector
@@ -174,7 +170,7 @@ mod tests {
       .await
       .expect("Failed to start broker B");
     broker_b
-      .add_plugin(Box::new(EncryptionPlugin::new(encryption_key.clone())))
+      .add_plugin(EncryptionPlugin::new(encryption_key.clone()))
       .await;
 
     // Subscribe on A

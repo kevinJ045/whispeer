@@ -10,27 +10,25 @@ pub type SubscriberId = Uuid;
 pub type AsyncHandler<T> = Box<dyn Fn(T) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 pub struct Subscriber<T> {
-    pub id: SubscriberId,
-    pub handler: AsyncHandler<T>,
+  pub id: SubscriberId,
+  pub handler: AsyncHandler<T>,
 }
 
 impl<T> Subscriber<T> {
-    pub fn new<F, Fut>(handler: F) -> Self
-    where
-        F: Fn(T) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        Self {
-            id: Uuid::new_v4(),
-            handler: Box::new(move |msg| Box::pin(handler(msg))),
-        }
+  pub fn new<F, Fut>(handler: F) -> Self
+  where
+    F: Fn(T) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+  {
+    Self {
+      id: Uuid::new_v4(),
+      handler: Box::new(move |msg| Box::pin(handler(msg))),
     }
+  }
 }
 
 impl<T> std::fmt::Debug for Subscriber<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Subscriber")
-            .field("id", &self.id)
-            .finish()
-    }
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("Subscriber").field("id", &self.id).finish()
+  }
 }

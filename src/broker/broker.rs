@@ -51,12 +51,16 @@ impl Broker {
     }
   }
 
-  pub async fn add_plugin(&self, mut plugin: Box<dyn Plugin>) {
+  pub async fn add_plugin(&self, mut plugin: impl Plugin + 'static) {
     if let Err(e) = plugin.on_init(self).await {
       eprintln!("Plugin {} failed to initialize: {}", plugin.name(), e);
       return;
     }
-    self.plugin_manager.write().await.add_plugin(plugin);
+    self
+      .plugin_manager
+      .write()
+      .await
+      .add_plugin(Box::new(plugin));
   }
 
   /// Starts the broker on the given address.
@@ -203,6 +207,7 @@ impl Broker {
     + 'static,
   ) {
     let topic_name = topic_name.into();
+
     let mut entry = self
       .topics
       .entry(topic_name.clone())
@@ -211,6 +216,15 @@ impl Broker {
     if let Some(topic) = entry.as_any_mut().downcast_mut::<Topic<T>>() {
       let subscriber = Subscriber::new(handler);
       topic.add_subscriber(subscriber);
+
+      // Call on_subscribe hook for plugins
+      let plugin_manager = self.plugin_manager.clone();
+      let topic_name_clone = topic_name.clone();
+      tokio::spawn(async move {
+        if let Err(e) = plugin_manager.read().await.on_subscribe(&topic_name_clone).await {
+          eprintln!("Plugin on_subscribe error for topic '{}': {}", topic_name_clone, e);
+        }
+      });
     } else {
       eprintln!(
         "Error: Topic '{}' exists with a different type.",

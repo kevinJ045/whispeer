@@ -28,6 +28,22 @@ impl PluginManager {
     Ok(())
   }
 
+  pub async fn on_before_recieve(
+    &self,
+    topic: &str,
+    payload: &mut Vec<u8>,
+    headers: &mut HashMap<String, String>,
+  ) -> Result<String, anyhow::Error> {
+    let orig_topic = topic;
+    let mut topic = topic.to_string();
+    for plugin in &self.plugins {
+      topic = plugin
+        .on_before_recieved(orig_topic, payload, headers)
+        .await?;
+    }
+    Ok(topic)
+  }
+
   pub async fn on_message_received(
     &self,
     topic: &str,
@@ -40,6 +56,16 @@ impl PluginManager {
     // On receive, we should decompress (B) then decrypt (A) (B -> A).
     for plugin in self.plugins.iter().rev() {
       plugin.on_message_received(topic, payload, headers).await?;
+    }
+    Ok(())
+  }
+
+  pub async fn on_subscribe(
+    &self,
+    topic: &str,
+  ) -> Result<(), anyhow::Error> {
+    for plugin in &self.plugins {
+      plugin.on_subscribe(topic).await?;
     }
     Ok(())
   }

@@ -16,7 +16,7 @@ async fn test_websocket_plugin() {
   // 1. Start Broker with WebSocketPlugin
   let broker = Broker::new();
   let ws_plugin = WebSocketPlugin::new("127.0.0.1:9090");
-  broker.add_plugin(Box::new(ws_plugin)).await;
+  broker.add_plugin(ws_plugin).await;
 
   // Give it a moment to start listening
   tokio::time::sleep(Duration::from_millis(100)).await;
