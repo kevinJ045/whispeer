@@ -5,7 +5,7 @@ edition = "2021"
 description = "A plugin-based pub/sub messaging system"
 license = "MIT"
 repository = "https://github.com/kevinj045/whispeer"
-keywords = ["pubsub", "broker", "messaging", "quic", "encryption", "compression"]
+keywords = ["pubsub", "messaging", "quic", "encryption", "compression"]
 
 [dependencies]
 async-trait = "0.1.77"
