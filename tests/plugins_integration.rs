@@ -3,10 +3,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use whispeer::Broker;
 use whispeer::plugins::compression::CompressionPlugin;
 use whispeer::plugins::encryption::EncryptionPlugin;
 use whispeer::plugins::plugin::Plugin;
+use whispeer::Broker;
 
 #[tokio::test]
 async fn test_compression_and_encryption_together() {

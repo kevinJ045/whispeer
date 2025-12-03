@@ -1,3 +1,62 @@
+//! # Whispeer
+//!
+//! `whispeer` is a Rust-native, lightweight, end-to-end **encrypted + compressed Pub/Sub broker** designed for secure messaging, real-time applications, and extensible event-driven systems.
+//!
+//! ## Core Features
+//! 1. **Broker Core**
+//!    - Topic registry
+//!    - Subscriber management
+//!    - Publish/subscribe API
+//! 2. **Compression Engine**
+//!    - Default: zstd
+//! 3. **Encryption Engine**
+//!    - Default: ChaCha20Poly1305
+//! 4. **Transport**
+//!    - QUIC-based transport for secure and efficient communication.
+//! 5. **Async Support**
+//!    - Built on the Tokio runtime.
+//!    - Async subscribers.
+//! 6. **Plugin System**
+//!    - Easily extend functionality with custom plugins.
+//! 7. **Typed Messages**
+//!    - Support for generic message types via `serde::Serialize` and `serde::Deserialize`.
+//!
+//! ## Simple Example
+//!
+//! ```rust,no_run
+//! use whispeer::Broker;
+//! use serde::{Serialize, Deserialize};
+//!
+//! #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+//! struct MyData {
+//!   name: String,
+//!   id: i32
+//! }
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let broker = Broker::new();
+//!     let topic = "some-event";
+//!
+//!     // Subscribe to a topic with a specific type
+//!     broker.subscribe(topic, |data: MyData| {
+//!         Box::pin(async move {
+//!             println!("Received data: {:?}", data);
+//!         })
+//!     });
+//!
+//!     // Publish data to the topic
+//!     let my_data = MyData {
+//!         name: "myname".to_string(),
+//!         id: 123
+//!     };
+//!
+//!     if let Err(e) = broker.publish(topic, my_data).await {
+//!         eprintln!("Failed to publish: {}", e);
+//!     }
+//! }
+//! ```
+
 pub mod broker;
 pub mod plugins;
 pub mod transport;

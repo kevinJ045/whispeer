@@ -6,11 +6,20 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
 
+/// A plugin that exposes the broker's functionality over a WebSocket connection.
+///
+/// This plugin starts a WebSocket server that clients can connect to in order to
+/// subscribe to topics and publish messages.
 pub struct WebSocketPlugin {
   addr: String,
 }
 
 impl WebSocketPlugin {
+  /// Creates a new `WebSocketPlugin` that will listen on the given address.
+  ///
+  /// # Arguments
+  ///
+  /// * `addr` - The address to bind the WebSocket server to (e.g., "127.0.0.1:8080").
   pub fn new(addr: &str) -> Self {
     Self {
       addr: addr.to_string(),
@@ -24,6 +33,7 @@ impl Plugin for WebSocketPlugin {
     "WebSocketPlugin"
   }
 
+  /// Initializes the plugin by starting the WebSocket server in a new task.
   async fn on_init(&mut self, broker: &crate::Broker) -> Result<(), anyhow::Error> {
     let addr = self.addr.clone();
     let broker = broker.clone();
@@ -65,6 +75,14 @@ impl Plugin for WebSocketPlugin {
   }
 }
 
+/// Handles a single WebSocket connection.
+///
+/// This function manages the communication with a single client, parsing incoming
+/// messages and handling the text-based protocol for subscribing and publishing.
+///
+/// The protocol is as follows:
+/// - `SUBSCRIBE <topic>`: Subscribes the client to the specified topic.
+/// - `PUBLISH <topic> <json_payload>`: Publishes a message to the specified topic.
 async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(), anyhow::Error> {
   let ws_stream = accept_async(stream).await.expect("Failed to accept");
   let (mut ws_sender, mut ws_receiver) = ws_stream.split();
@@ -73,7 +91,7 @@ async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(
   let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
   // Task to forward messages from the channel to the WS client
-  let mut send_task = tokio::spawn(async move {
+  let send_task = tokio::spawn(async move {
     while let Some(message) = rx.recv().await {
       if let Err(e) = ws_sender.send(message).await {
         eprintln!("Error sending message to WS client: {}", e);
@@ -93,7 +111,6 @@ async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(
 
       let parts: Vec<&str> = text.splitn(2, ' ').collect();
       if parts.len() < 2 {
-        // Maybe just payload? Or ignore?
         continue;
       }
 
@@ -104,17 +121,6 @@ async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(
         let topic_name = rest.trim();
         println!("WS Client subscribing to: {}", topic_name);
 
-        // Ensure topic exists (create if not) - but we need a type.
-        // For now, assume generic JSON topic if creating, or attach to existing.
-        // Since we don't know the type T, we can't call `subscribe` easily if it creates a new topic.
-        // But `subscribe_json` is on `TopicOperations`.
-        // We need to ensure the topic exists.
-        // Hack: We can't easily create a typed topic without knowing the type.
-        // For this MVP, let's assume the topic is created elsewhere or we default to serde_json::Value?
-        // Or we can try to get it, and if not found, we can't subscribe yet?
-        // Or we create a Topic<serde_json::Value>.
-
-        // Let's try to get the topic.
         if let Some(mut topic) = broker.get_topic(topic_name) {
           let tx = tx.clone();
           topic.subscribe_json(Box::new(move |payload| {
@@ -124,10 +130,6 @@ async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(
             })
           }));
         } else {
-          // Topic doesn't exist. Create it as Topic<serde_json::Value>
-          // We need to call a method on broker to create it.
-          // Broker::subscribe creates it.
-          // broker.subscribe::<serde_json::Value>(topic_name, ...);
           let tx = tx.clone();
           broker.subscribe::<serde_json::Value>(topic_name, move |payload| {
             let tx = tx.clone();
@@ -143,7 +145,6 @@ async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(
           let topic_name = parts[0];
           let payload = parts[1];
 
-          // Publish as serde_json::Value to handle generic JSON
           if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) {
             if let Err(e) = broker.publish(topic_name, value).await {
               eprintln!("Failed to publish from WS: {}", e);

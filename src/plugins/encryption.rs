@@ -2,15 +2,25 @@ use crate::plugins::plugin::Plugin;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-use aes_gcm::aead::{Aead, KeyInit}; // <-- correct import
+use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
+use base64::Engine;
 use rand::RngCore;
 
+/// A plugin that provides end-to-end encryption for messages.
+///
+/// This plugin uses AES-256-GCM to encrypt message payloads before they are published
+/// and decrypt them after they are received, ensuring message confidentiality.
 pub struct EncryptionPlugin {
   key: [u8; 32],
 }
 
 impl EncryptionPlugin {
+  /// Creates a new `EncryptionPlugin` with the given encryption key.
+  ///
+  /// # Arguments
+  ///
+  /// * `key` - A 32-byte array representing the AES-256 key.
   pub fn new(key: [u8; 32]) -> Self {
     Self { key }
   }
@@ -22,6 +32,10 @@ impl Plugin for EncryptionPlugin {
     "EncryptionPlugin"
   }
 
+  /// Encrypts the message payload using AES-256-GCM before publishing.
+  ///
+  /// It generates a random nonce for each message, encrypts the payload, and then
+  /// adds `X-Encryption: aes256-gcm` and `X-Nonce` headers to the message.
   async fn on_publish(
     &self,
     _topic: &str,
@@ -36,20 +50,25 @@ impl Plugin for EncryptionPlugin {
 
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    // Encrypt
     let encrypted = cipher
       .encrypt(nonce, payload.as_ref())
       .map_err(|e| anyhow::anyhow!("encryption failed: {}", e))?;
 
     *payload = encrypted;
 
-    // Add headers
     headers.insert("X-Encryption".into(), "aes256-gcm".into());
-    headers.insert("X-Nonce".into(), base64::encode(nonce_bytes));
+    headers.insert(
+      "X-Nonce".into(),
+      base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
+    );
 
     Ok(())
   }
 
+  /// Decrypts the message payload if it has the appropriate encryption headers.
+  ///
+  /// It looks for the `X-Encryption: aes256-gcm` and `X-Nonce` headers to
+  /// correctly decrypt the payload.
   async fn on_message_received(
     &self,
     _topic: &str,
@@ -62,12 +81,11 @@ impl Plugin for EncryptionPlugin {
 
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key));
 
-    // Read nonce from headers
     let nonce_b64 = headers
       .get("X-Nonce")
       .ok_or_else(|| anyhow::anyhow!("missing nonce header"))?;
 
-    let nonce_bytes = base64::decode(nonce_b64)?;
+    let nonce_bytes = base64::engine::general_purpose::STANDARD.decode(nonce_b64)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     // Decrypt

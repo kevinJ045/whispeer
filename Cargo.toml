@@ -1,10 +1,11 @@
 [package]
 name = "whispeer"
-version = "0.0.1"
-edition = "2024"
+version = "0.0.2"
+edition = "2021"
 description = "A plugin-based pub/sub messaging system"
 license = "MIT"
 repository = "https://github.com/kevinj045/whispeer"
+keywords = ["pubsub", "broker", "messaging", "quic", "encryption", "compression"]
 
 [dependencies]
 async-trait = "0.1.77"

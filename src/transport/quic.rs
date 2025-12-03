@@ -1,19 +1,36 @@
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use rustls::{Certificate, PrivateKey};
-use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>), Box<dyn Error>> {
+/// Creates a QUIC server endpoint.
+///
+/// This function configures and creates a QUIC endpoint that can be used to listen for
+/// incoming connections. It generates a self-signed certificate for development purposes.
+///
+/// # Arguments
+///
+/// * `bind_addr` - The socket address to bind the server to.
+pub fn make_server_endpoint(bind_addr: SocketAddr) -> Result<(Endpoint, Vec<u8>), anyhow::Error> {
   let (server_config, server_cert) = configure_server()?;
   let endpoint = Endpoint::server(server_config, bind_addr)?;
   Ok((endpoint, server_cert))
 }
 
+/// Creates a QUIC client endpoint.
+///
+/// This function configures and creates a QUIC endpoint that can be used to connect to a
+/// server. For development, it uses a custom certificate verifier that skips server
+/// certificate validation.
+///
+/// # Arguments
+///
+/// * `bind_addr` - The socket address to bind the client to.
+/// * `server_cert` - The server's certificate (currently unused due to skipping verification).
 pub fn make_client_endpoint(
   bind_addr: SocketAddr,
   server_cert: &[u8],
-) -> Result<Endpoint, Box<dyn Error>> {
+) -> Result<Endpoint, anyhow::Error> {
   let client_config = configure_client(server_cert)?;
   let mut endpoint = Endpoint::client(bind_addr)?;
   endpoint.set_default_client_config(client_config);
@@ -21,7 +38,8 @@ pub fn make_client_endpoint(
   Ok(endpoint)
 }
 
-fn configure_server() -> Result<(ServerConfig, Vec<u8>), Box<dyn Error>> {
+/// Configures the QUIC server with a self-signed certificate.
+fn configure_server() -> Result<(ServerConfig, Vec<u8>), anyhow::Error> {
   let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()])?;
   let cert_der = cert.serialize_der()?;
   let priv_key = cert.serialize_private_key_der();
@@ -35,7 +53,8 @@ fn configure_server() -> Result<(ServerConfig, Vec<u8>), Box<dyn Error>> {
   Ok((server_config, cert_der))
 }
 
-fn configure_client(_server_cert: &[u8]) -> Result<ClientConfig, Box<dyn Error>> {
+/// Configures the QUIC client, currently skipping server verification.
+fn configure_client(_server_cert: &[u8]) -> Result<ClientConfig, anyhow::Error> {
   let crypto = rustls::ClientConfig::builder()
     .with_safe_defaults()
     .with_custom_certificate_verifier(SkipServerVerification::new())
@@ -44,6 +63,12 @@ fn configure_client(_server_cert: &[u8]) -> Result<ClientConfig, Box<dyn Error>>
   Ok(ClientConfig::new(Arc::new(crypto)))
 }
 
+/// A dummy certificate verifier for development purposes.
+///
+/// This struct implements `ServerCertVerifier` but performs no validation, effectively
+/// trusting any server certificate.
+///
+/// **Warning:** This is insecure and should not be used in a production environment.
 struct SkipServerVerification;
 
 impl SkipServerVerification {

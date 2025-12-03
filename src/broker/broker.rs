@@ -5,7 +5,7 @@ use crate::plugins::plugin::Plugin;
 use crate::transport::quic::{make_client_endpoint, make_server_endpoint};
 use dashmap::DashMap;
 use quinn::{Connection, Endpoint};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,18 +14,24 @@ use tokio::sync::RwLock;
 
 use super::message::{MessageLocal, MessageSend};
 
+/// Represents errors that can occur within the broker.
 #[derive(Error, Debug)]
 pub enum BrokerError {
+  /// Error returned when a topic is not found.
   #[error("Topic not found")]
   TopicNotFound,
+  /// Error returned when there is a type mismatch for a topic.
   #[error("Type mismatch")]
   TypeMismatch,
+  /// Error returned for network-related issues.
   #[error("Network error: {0}")]
   NetworkError(String),
+  /// Error returned from a plugin.
   #[error("Plugin error: {0}")]
   PluginError(String),
 }
 
+/// A message format for sending data over the wire, including topic, payload, and headers.
 #[derive(Serialize, Deserialize, Debug)]
 struct WireMessage {
   topic: String,
@@ -33,6 +39,11 @@ struct WireMessage {
   headers: HashMap<String, String>,
 }
 
+/// The central component of the pub/sub system.
+///
+/// The `Broker` is responsible for managing topics, subscribers, and network peers.
+/// It handles publishing messages to topics and delivering them to subscribers, both locally
+/// and across the network.
 #[derive(Clone)]
 pub struct Broker {
   topics: Arc<DashMap<String, Box<dyn TopicOperations>>>,
@@ -42,6 +53,9 @@ pub struct Broker {
 }
 
 impl Broker {
+  /// Creates a new, empty `Broker` instance.
+  ///
+  /// This broker is not yet connected to the network and has no topics or subscribers.
   pub fn new() -> Self {
     Self {
       topics: Arc::new(DashMap::new()),
@@ -51,6 +65,14 @@ impl Broker {
     }
   }
 
+  /// Adds a plugin to the broker.
+  ///
+  /// Plugins can extend the broker's functionality by hooking into various events,
+  /// such as message publishing or new subscriptions.
+  ///
+  /// # Arguments
+  ///
+  /// * `plugin` - An instance of a type that implements the `Plugin` trait.
   pub async fn add_plugin(&self, mut plugin: impl Plugin + 'static) {
     if let Err(e) = plugin.on_init(self).await {
       eprintln!("Plugin {} failed to initialize: {}", plugin.name(), e);
@@ -63,9 +85,16 @@ impl Broker {
       .add_plugin(Box::new(plugin));
   }
 
-  /// Starts the broker on the given address.
-  /// Tries to bind (listen). If it fails, tries to connect to the address.
-  pub async fn start(addr_str: impl Into<String>) -> Result<Self, Box<dyn std::error::Error>> {
+  /// Starts the broker's network listener or connects to a peer.
+  ///
+  /// The `addr_str` determines the mode of operation:
+  /// - `"server <ip>:<port>"`: Starts a server that listens for incoming connections.
+  /// - `"client <ip>:<port>"`: Connects to a peer at the specified address.
+  ///
+  /// # Arguments
+  ///
+  /// * `addr_str` - A string specifying the mode and address.
+  pub async fn start(addr_str: impl Into<String>) -> Result<Self, anyhow::Error> {
     let addr_str = addr_str.into();
     let addr_string: Vec<&str> = addr_str.split(" ").collect();
     let mode = addr_string[0].to_string();
@@ -81,7 +110,6 @@ impl Broker {
         plugin_manager: Arc::new(RwLock::new(PluginManager::new())),
       };
 
-      // Spawn listener task
       let broker_clone = broker.clone();
       tokio::spawn(async move {
         broker_clone.accept_loop(endpoint).await;
@@ -124,6 +152,7 @@ impl Broker {
     }
   }
 
+  /// Main loop for accepting incoming QUIC connections.
   pub async fn accept_loop(&self, endpoint: Endpoint) {
     println!("Accept loop running");
 
@@ -142,6 +171,7 @@ impl Broker {
     }
   }
 
+  /// Handles an individual QUIC connection, listening for incoming streams.
   async fn handle_connection(&self, connection: quinn::Connection) {
     println!("Handling connection");
 
@@ -168,6 +198,7 @@ impl Broker {
     }
   }
 
+  /// Processes a single incoming stream, deserializing the message and publishing it locally.
   async fn handle_stream(&self, mut stream: quinn::RecvStream) -> Result<(), anyhow::Error> {
     println!("Handling Stream");
     let buf = stream.read_to_end(1024 * 1024).await?;
@@ -175,7 +206,6 @@ impl Broker {
     if let Ok(mut msg) = serde_json::from_slice::<WireMessage>(&buf) {
       println!("Received network message for topic: {}", msg.topic);
 
-      // Run plugins on received message
       self
         .plugin_manager
         .read()
@@ -183,8 +213,6 @@ impl Broker {
         .on_message_received(&msg.topic, &mut msg.payload, &msg.headers)
         .await?;
 
-      // Convert payload back to string for MVP JSON publishing
-      // This assumes the payload is valid UTF-8 JSON after plugin processing (decompression)
       if let Ok(payload_str) = String::from_utf8(msg.payload) {
         if let Some(topic) = self.topics.get(&msg.topic) {
           topic.publish_json(&payload_str).await;
@@ -197,14 +225,23 @@ impl Broker {
     Ok(())
   }
 
-  /// Subscribes to a topic. Creates the topic if it doesn't exist.
+  /// Subscribes to a topic with an asynchronous handler.
+  ///
+  /// When a message of type `T` is published to the specified topic, the `handler`
+  /// will be called with the message.
+  ///
+  /// # Arguments
+  ///
+  /// * `topic_name` - The name of the topic to subscribe to.
+  /// * `handler` - An async function or closure that takes a message of type `T` and
+  ///   returns a pinned future.
   pub fn subscribe<T: 'static + Send + Sync + Clone + DeserializeOwned + Serialize>(
     &self,
     topic_name: impl Into<String>,
     handler: impl Fn(T) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-    + Send
-    + Sync
-    + 'static,
+      + Send
+      + Sync
+      + 'static,
   ) {
     let topic_name = topic_name.into();
 
@@ -221,8 +258,16 @@ impl Broker {
       let plugin_manager = self.plugin_manager.clone();
       let topic_name_clone = topic_name.clone();
       tokio::spawn(async move {
-        if let Err(e) = plugin_manager.read().await.on_subscribe(&topic_name_clone).await {
-          eprintln!("Plugin on_subscribe error for topic '{}': {}", topic_name_clone, e);
+        if let Err(e) = plugin_manager
+          .read()
+          .await
+          .on_subscribe(&topic_name_clone)
+          .await
+        {
+          eprintln!(
+            "Plugin on_subscribe error for topic '{}': {}",
+            topic_name_clone, e
+          );
         }
       });
     } else {
@@ -233,7 +278,15 @@ impl Broker {
     }
   }
 
-  /// Publishes a message to a topic (local and remote).
+  /// Publishes a message to a topic.
+  ///
+  /// The message is delivered to all local subscribers and sent over the network
+  /// to all connected peers.
+  ///
+  /// # Arguments
+  ///
+  /// * `topic_name` - The name of the topic to publish to.
+  /// * `message` - The message to publish. It must be serializable.
   pub async fn publish<T: MessageSend<'static>>(
     &self,
     topic_name: impl Into<String>,
@@ -283,7 +336,7 @@ impl Broker {
     Ok(())
   }
 
-  // Internal helper for local publish
+  /// Publishes a message to local subscribers only.
   async fn publish_local<T: MessageLocal<'static>>(
     &self,
     topic_name: &String,
@@ -307,10 +360,12 @@ impl Broker {
 }
 
 impl Broker {
+  /// Returns the QUIC endpoint of the broker, if it is running.
   pub fn endpoint(&self) -> Option<Endpoint> {
     return self.endpoint.clone();
   }
 
+  /// Retrieves a mutable reference to a topic by its name.
   pub fn get_topic(
     &self,
     name: &str,
