@@ -102,7 +102,7 @@ impl Broker {
 
     if mode == "server" {
       let (endpoint, _cert) = make_server_endpoint(addr)?;
-      println!("Broker listening on {}", addr);
+      // println!("Broker listening on {}", addr);
       let broker = Self {
         topics: Arc::new(DashMap::new()),
         peers: Arc::new(DashMap::new()),
@@ -117,7 +117,7 @@ impl Broker {
 
       Ok(broker)
     } else {
-      println!("Address {} in use, trying to connect...", addr);
+      // println!("Address {} in use, trying to connect...", addr);
       // Try to connect as client
       // We need to bind to a different port (0)
       let client_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
@@ -131,7 +131,7 @@ impl Broker {
       let connecting = endpoint.connect(addr, "localhost")?;
       let connection = connecting.await?;
 
-      println!("Connected to peer at {}", addr);
+      // println!("Connected to peer at {}", addr);
 
       let broker = Self {
         topics: Arc::new(DashMap::new()),
@@ -154,7 +154,7 @@ impl Broker {
 
   /// Main loop for accepting incoming QUIC connections.
   pub async fn accept_loop(&self, endpoint: Endpoint) {
-    println!("Accept loop running");
+    // println!("Accept loop running");
 
     while let Some(connecting) = endpoint.accept().await {
       let self_clone = self.clone();
@@ -162,7 +162,7 @@ impl Broker {
       tokio::spawn(async move {
         match connecting.await {
           Ok(conn) => {
-            println!("New connection");
+            // println!("New connection");
             self_clone.handle_connection(conn).await;
           }
           Err(e) => eprintln!("Connection failed: {e}"),
@@ -173,12 +173,12 @@ impl Broker {
 
   /// Handles an individual QUIC connection, listening for incoming streams.
   async fn handle_connection(&self, connection: quinn::Connection) {
-    println!("Handling connection");
+    // println!("Handling connection");
 
     loop {
       match connection.accept_uni().await {
         Ok(stream) => {
-          println!("Received something");
+          // println!("Received something");
           let self_clone = self.clone();
           tokio::spawn(async move {
             if let Err(e) = self_clone.handle_stream(stream).await {
@@ -200,11 +200,11 @@ impl Broker {
 
   /// Processes a single incoming stream, deserializing the message and publishing it locally.
   async fn handle_stream(&self, mut stream: quinn::RecvStream) -> Result<(), anyhow::Error> {
-    println!("Handling Stream");
+    // println!("Handling Stream");
     let buf = stream.read_to_end(1024 * 1024).await?;
 
     if let Ok(mut msg) = serde_json::from_slice::<WireMessage>(&buf) {
-      println!("Received network message for topic: {}", msg.topic);
+      // println!("Received network message for topic: {}", msg.topic);
 
       self
         .plugin_manager
@@ -366,6 +366,7 @@ impl Broker {
   }
 
   /// Retrieves a mutable reference to a topic by its name.
+  #[allow(mismatched_lifetime_syntaxes)]
   pub fn get_topic(
     &self,
     name: &str,

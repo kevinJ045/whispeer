@@ -41,7 +41,7 @@ impl Plugin for WebSocketPlugin {
     tokio::spawn(async move {
       let try_socket = TcpListener::bind(&addr).await;
       let listener = try_socket.expect("Failed to bind");
-      println!("WebSocket server listening on: {}", addr);
+      // println!("WebSocket server listening on: {}", addr);
 
       while let Ok((stream, _)) = listener.accept().await {
         let broker = broker.clone();
@@ -119,7 +119,7 @@ async fn handle_connection(stream: TcpStream, broker: crate::Broker) -> Result<(
 
       if command == "SUBSCRIBE" {
         let topic_name = rest.trim();
-        println!("WS Client subscribing to: {}", topic_name);
+        // println!("WS Client subscribing to: {}", topic_name);
 
         if let Some(mut topic) = broker.get_topic(topic_name) {
           let tx = tx.clone();
