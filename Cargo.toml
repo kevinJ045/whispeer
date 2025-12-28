@@ -1,6 +1,6 @@
 [package]
 name = "whispeer"
-version = "0.0.21"
+version = "0.0.22"
 edition = "2021"
 description = "A plugin-based pub/sub messaging system"
 license = "MIT"

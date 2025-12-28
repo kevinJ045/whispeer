@@ -61,7 +61,20 @@ pub mod broker;
 pub mod plugins;
 pub mod transport;
 
+pub use aes;
+pub use aes_gcm;
+pub use anyhow;
+pub use async_compression;
+pub use async_trait;
+pub use base64;
 pub use broker::Broker;
+pub use dashmap;
+pub use futures;
+pub use quinn;
+pub use rustls;
+pub use thiserror;
+pub use tokio;
+pub use uuid;
 
 #[cfg(test)]
 mod tests {
